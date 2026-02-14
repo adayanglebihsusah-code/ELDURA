@@ -1,7 +1,16 @@
+# Stage 1: Build frontend assets
+FROM node:20 as frontend
+WORKDIR /app
+COPY package*.json vite.config.js ./
+RUN npm install
+COPY . .
+RUN npm run build
+
+# Stage 2: Serve the application
 FROM php:8.3-cli
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies (minimized)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     libpng-dev \
@@ -10,11 +19,7 @@ RUN apt-get update && apt-get install -y \
     zip \
     unzip \
     libpq-dev \
-    nodejs \
-    npm
-
-# Clear cache
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install PHP extensions
 RUN docker-php-ext-install pdo_pgsql mbstring exif pcntl bcmath gd
@@ -28,9 +33,11 @@ WORKDIR /var/www
 # Copy existing application directory contents
 COPY . /var/www
 
-# Install dependencies
+# Copy built frontend assets from Stage 1 ensures we don't need npm in production
+COPY --from=frontend /app/public/build /var/www/public/build
+
+# Install dependencies (only production)
 RUN composer install --no-dev --optimize-autoloader
-RUN npm install && npm run build
 
 # Fix permissions
 RUN chown -R www-data:www-data /var/www
@@ -39,5 +46,4 @@ RUN chown -R www-data:www-data /var/www
 EXPOSE 8000
 
 # Start command
-# Uses sh -c to ensure environment variables like PORT are expanded
 CMD sh -c "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=${PORT:-8000}"
